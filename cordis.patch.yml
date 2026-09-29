@@ -1,0 +1,6 @@
+# dsh-archive-delete bundle patch — inserts this plugin into the composition.
+# Install: dsh plugin --profile <name> add dsh-archive-delete
+#          (or a local build: dsh plugin --profile <name> add file:/path/to.tgz)
+- insert:
+    - id: dsh-archive-delete
+      name: 'dsh-archive-delete'

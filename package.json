@@ -1,0 +1,60 @@
+{
+  "name": "@very12345/dsh-archive-delete",
+  "version": "0.2.3",
+  "type": "module",
+  "description": "Delete a conversation straight from the DSH Web GUI sidebar row (per-row hover action), including its DSH archive-gate entry. Standalone and DSH-version-agnostic: no bridge or Feishu coupling.",
+  "license": "MIT",
+  "author": "Very12345",
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "deepseek-harness",
+    "session",
+    "delete",
+    "archive",
+    "sidebar"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Very12345/dsh-archive-delete.git"
+  },
+  "homepage": "https://github.com/Very12345/dsh-archive-delete#readme",
+  "bugs": {
+    "url": "https://github.com/Very12345/dsh-archive-delete/issues"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "selftest-entry.cjs",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# packaged tarballs
+*.tgz
+
+# logs & env
+*.log
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+
+# ---------------------------------------------------------------------------
+# Machine-specific deployment helpers. These reference real hosts, the
+# systemd unit name and absolute $HOME layouts on the private servers, so they
+# stay local and are never published.
+# ---------------------------------------------------------------------------
+scripts/
+durable-install.sh
+verify-hosts.sh
+verify-remote.sh
+cleanup-packages2.sh

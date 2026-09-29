@@ -1,0 +1,26 @@
+NOTICE
+======
+
+dsh-archive-delete
+------------------
+  Author:  Very12345
+  Source:  https://github.com/Very12345/dsh-archive-delete
+  License: MIT (see LICENSE)
+
+This plugin is original work. It is not a fork of any other project.
+
+Relationship to DeepSeek Harness
+--------------------------------
+This is a third-party community plugin for DeepSeek Harness (`dsh`). It is not
+part of DSH and is not affiliated with, endorsed by, or sponsored by DeepSeek.
+
+It interacts with DSH only through public extension points: the `webServer`
+inject for its host half, and the DSH client slot API
+(`sidebar.workspaces.session.row.action` and `shell.overlay`) for its client
+half. It deliberately imports no DSH service so that it cannot break another
+plugin's load order.
+
+Trademarks
+----------
+DeepSeek is a trademark of its respective owner. All other trademarks are the
+property of their respective owners.

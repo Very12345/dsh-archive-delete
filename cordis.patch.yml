@@ -1,6 +1,11 @@
 # dsh-archive-delete bundle patch — inserts this plugin into the composition.
-# Install: dsh plugin --profile <name> add dsh-archive-delete
+# Install: dsh plugin --profile <name> add @very12345/dsh-archive-delete
 #          (or a local build: dsh plugin --profile <name> add file:/path/to.tgz)
+#
+# `name` is the package specifier the dsh loader imports, resolved from the
+# profile directory. It must be the FULL published package name: pnpm installs
+# this package under its scoped directory, so a bare `dsh-archive-delete` is not
+# resolvable in a profile and the entry's import fails without activating.
 - insert:
     - id: dsh-archive-delete
-      name: 'dsh-archive-delete'
+      name: '@very12345/dsh-archive-delete'

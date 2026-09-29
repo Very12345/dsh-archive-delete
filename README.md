@@ -37,8 +37,17 @@ This plugin is deliberately **standalone and DSH-version-agnostic**:
 - **Version-agnostic log matching.** Session logs are matched by *shape*
   (`/^session(?:\.[a-z0-9]+)?\.jsonl\.zstd$/`), so both the v3 and v4/v0.2 naming
   schemes work without a version check.
-- **Single HTTP route.** The client half injects the button; the host half
-  answers it with one route that performs the removal.
+- **Two exact HTTP routes.** The client half injects the row controls; the host
+  half answers `/plugins/dsh-archive-delete/list` and
+  `/plugins/dsh-archive-delete/delete`. Both register with `kind: "exact"`,
+  which the web server matches before any prefix route, so the `/plugins`
+  prefix the client-module host owns never shadows them.
+- **Names are the published package name.** The bundle patch entry and the
+  client-half registration id both use `@very12345/dsh-archive-delete`. The dsh
+  loader resolves the patch entry's `name` as a module specifier from the profile
+  directory, and the client-module host requests each client bundle by package
+  name; a bare `dsh-archive-delete` resolves to neither, which silently costs
+  the whole plugin its activation.
 - **Home resolution** follows `DSH_HOME`, then `WEBAGENT_HOME/deepseek-harness`,
   then `~/.dsh`.
 

@@ -21,8 +21,13 @@
 //
 // Plain JS on purpose: the DSH client loader hands the factory a `require`, so the
 // plugin needs no build step to stay compatible with new lines.
+//
+// The registration id must be the FULL published package name: the client-modules
+// host requests each bundle under its package name (`/plugins/<id>/client.js`) and
+// then asserts the script registered that same id. This file ships unbundled, so
+// there is no build step to keep the two in sync — change it here.
 window.__ModuleLoader__.load({
-	id: "dsh-archive-delete",
+	id: "@very12345/dsh-archive-delete",
 	factory: (require) => {
 		const R = require("react");
 		const h = R.createElement;

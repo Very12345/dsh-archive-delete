@@ -9,6 +9,13 @@ node_modules/
 .env
 .env.*
 
+# DSH credential stores — never commit. DSH keeps API keys and app secrets in
+# these plaintext YAML documents under $DSH_HOME.
+.credentials.yaml
+.credentials.yaml.*
+**/.credentials.yaml
+**/.credentials.yaml.*
+
 # OS / editor
 .DS_Store
 Thumbs.db

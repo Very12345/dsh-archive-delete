@@ -3,6 +3,7 @@
 // row controls appear ONLY for ids the host reports as archived.
 const fs = require("node:fs");
 const path = require("node:path");
+const assert = require("node:assert/strict");
 
 const entry = process.argv[2] || path.join(__dirname, "client.js");
 const ARCHIVED_ID = "session-aaaa-archived";
@@ -85,10 +86,15 @@ if (!row || !bar) throw new Error("a seat was not registered");
 // wait for the async /list the entry fires on apply()
 setTimeout(() => {
   const unarchived = row.component({ sessionId: PLAIN_ID, displayTitle: "normal chat" });
+  assert.equal(unarchived, null, "ordinary sessions must not offer deletion");
   console.log("NOT archived -> no controls:", unarchived === null);
 
   const archived = row.component({ sessionId: ARCHIVED_ID, displayTitle: "old chat" });
   const [checkbox, button] = archived?.children || [];
+  assert.equal(checkbox?.props?.type, "checkbox");
+  assert.equal(button?.type, "button");
+  assert.equal(row.component({}), null);
+  assert.equal(bar.component({}), null);
   console.log("archived -> checkbox:", checkbox?.props?.type === "checkbox");
   console.log("archived -> delete button:", button?.type === "button");
 

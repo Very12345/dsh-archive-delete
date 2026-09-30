@@ -2,6 +2,9 @@
   "name": "@very12345/dsh-archive-delete",
   "version": "0.2.4",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js && node selftest-entry.cjs"
+  },
   "description": "Delete a conversation straight from the DSH Web GUI sidebar row (per-row hover action), including its DSH archive-gate entry. Standalone and DSH-version-agnostic: no bridge or Feishu coupling.",
   "license": "MIT",
   "author": "Very12345",

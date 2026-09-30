@@ -92,7 +92,9 @@ const isLive = (dir) => {
 		execFileSync("flock", ["-n", lock, "true"], { stdio: "ignore" });
 		return false;
 	} catch (error) {
-		if (error?.code === "ENOENT") return false; // no flock binary — cannot test
+		// A missing flock binary cannot prove that an existing lock is idle.
+		// Refuse deletion on platforms where the lock cannot be probed.
+		if (error?.code === "ENOENT") return true;
 		return true;
 	}
 };

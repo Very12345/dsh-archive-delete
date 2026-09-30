@@ -1,63 +1,45 @@
 # dsh-archive-delete
 
-Delete a conversation **straight from the DSH Web GUI sidebar**, including its
-DSH archive-gate entry.
+独立 DSH 插件，包名 `@very12345/dsh-archive-delete`。在 DSH 侧栏为已归档会话提供删除控件，并同步移除会话目录和归档登记。可以单独使用，不依赖网页模型后端或飞书桥接。
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) can only
-*archive* a session: it hides the session id inside
-`<DSH_HOME>/storages/workspace.json` (`global.archivedSessionIds`) and the Web
-GUI then offers no list, no restore and no delete for it. This plugin fills that
-gap.
-
-## What it does
-
-- Adds a **delete action to each sidebar row's hover card** — one click, no
-  digging through the filesystem.
-- Removes **both** the session directory **and** the archive-gate entry, so the
-  conversation is genuinely gone rather than half-archived.
-- Refuses to delete a session that is currently being driven (flock probe on
-  `session.lock`), so you cannot corrupt a live run.
-
-## Install
+## 安装与使用
 
 ```sh
-dsh plugin --profile <name> add @very12345/dsh-archive-delete
+dsh plugin --profile desktop add github:Very12345/dsh-archive-delete
+# CLI WebUI 可选择 --profile web
 ```
 
-Restart the profile afterwards (or rely on `patchReload` if the profile has it
-set to `live`) so the host half loads and the sidebar action appears.
+当前使用 GitHub 源码安装；也可在本仓库执行 `npm pack`，再用 `dsh plugin --profile <name> add file:/absolute/path/package.tgz` 安装本地包。npm 公共仓库暂无可直接安装的 scoped 包。
 
-## Design notes
+加载新版本后重启对应 DSH 宿主/profile。在已归档会话行中选择删除；普通会话不显示删除控件。需要 DSH 的 Web GUI 接口及 Node.js >= 20，当前工作区兼容目标为 DSH 0.2 系列。
 
-This plugin is deliberately **standalone and DSH-version-agnostic**:
+## 删除边界
 
-- **No coupling.** No bridge or Feishu dependency, and it imports no DSH
-  service — the session store is treated as a plain directory tree. That keeps
-  it from breaking anyone else's load order.
-- **Version-agnostic log matching.** Session logs are matched by *shape*
-  (`/^session(?:\.[a-z0-9]+)?\.jsonl\.zstd$/`), so both the v3 and v4/v0.2 naming
-  schemes work without a version check.
-- **Two exact HTTP routes.** The client half injects the row controls; the host
-  half answers `/plugins/dsh-archive-delete/list` and
-  `/plugins/dsh-archive-delete/delete`. Both register with `kind: "exact"`,
-  which the web server matches before any prefix route, so the `/plugins`
-  prefix the client-module host owns never shadows them.
-- **Names are the published package name.** The bundle patch entry and the
-  client-half registration id both use `@very12345/dsh-archive-delete`. The dsh
-  loader resolves the patch entry's `name` as a module specifier from the profile
-  directory, and the client-module host requests each client bundle by package
-  name; a bare `dsh-archive-delete` resolves to neither, which silently costs
-  the whole plugin its activation.
-- **Home resolution** follows `DSH_HOME`, then `WEBAGENT_HOME/deepseek-harness`,
-  then `~/.dsh`.
+- 默认只删除已归档的会话，接口与 GUI 采用同一范围。
+- 删除会话目录，并更新 `storages/workspace.json` 中的 `global.archivedSessionIds`。
+- 会话存在锁时，使用 `flock` 探测是否仍被占用；无法确认锁已释放时拒绝删除。
+- Windows 没有 `flock` 时，对仍存在锁文件的会话保守拒绝；没有锁文件的已归档会话仍可删除。
+- 兼容 `session[.<format>].jsonl.zstd` 日志名称，不通过旧 DSH 版本常量判断格式。
 
-## Requirements
+宿主路由为 `/plugins/dsh-archive-delete/list` 和 `/plugins/dsh-archive-delete/delete`，以 exact route 注册。会话目录按照 `DSH_HOME`、`WEBAGENT_HOME/deepseek-harness`、`~/.dsh` 的顺序解析，已有部署仍可沿用显式目录。
 
-- DSH with the Web GUI (`web` profile).
-- Node.js >= 20.
+## 源码与验证
 
-## License
+| 文件 | 职责 |
+| --- | --- |
+| `index.js` | 归档列表、删除接口及会话存储处理 |
+| `client.js` | DSH 侧栏控件与批量选择 |
+| `cordis.patch.yml` | 官方 bundle 插件配置 |
+| `test/`、`selftest-entry.cjs` | 隔离临时目录的宿主测试及客户端入口检查 |
 
-MIT — see [LICENSE](./LICENSE).
+```sh
+npm test
+npm pack --dry-run
+npm pack
+```
 
-Not affiliated with DeepSeek. See [NOTICE](./NOTICE) for trademark details.
+测试不读取真实 DSH 会话。私人部署脚本保留在本地 `scripts/`，不进入插件包。发布入口和客户端注册名使用完整包名，避免裸名在 profile 中解析失败。
+
+## 许可证
+
+MIT，见 [LICENSE](./LICENSE)，关系及商标说明见 [NOTICE](./NOTICE)。

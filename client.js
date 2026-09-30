@@ -1,10 +1,10 @@
 // dsh-archive-delete — CLIENT half.
 //
 // Scope: ARCHIVED conversations only. DSH archives by hiding the session id in
-// the host gate list (`storages/workspace.json`), and the GUI offers no way to
-// act on those ids. The host route of this plugin is authoritative about which
-// ids are archived, so the row controls appear only for ids it lists — a normal
-// conversation never shows them.
+// the host gate list (`storages/workspace.json`). The DSH Workspace projection
+// delivers Host-confirmed archive changes; controls follow that observable so
+// newly archived conversations need no reload or focus change. The delete route
+// independently validates archive membership before touching session data.
 //
 // Two surfaces:
 //   * `sidebar.workspaces.session.row.action` — the icon strip beside the archive
@@ -64,7 +64,15 @@ window.__ModuleLoader__.load({
 		/** normalized id → the live row element (for hiding exactly that row). */
 		const rowNodes = new Map();
 		const listeners = new Set();
+		let revision = 0;
+		let workspaceList = null;
+		const subscribe = (notify) => {
+			listeners.add(notify);
+			return () => listeners.delete(notify);
+		};
+		const getRevision = () => revision;
 		const emit = () => {
+			revision += 1;
 			for (const notify of [...listeners]) {
 				try {
 					notify();
@@ -74,13 +82,25 @@ window.__ModuleLoader__.load({
 			}
 		};
 		const useShared = () => {
-			const [, bump] = R.useState(0);
-			R.useEffect(() => {
-				const notify = () => bump((n) => n + 1);
-				listeners.add(notify);
-				return () => listeners.delete(notify);
-			}, []);
+			R.useSyncExternalStore(subscribe, getRevision, getRevision);
 			return store;
+		};
+		const installArchived = (ids) => {
+			const next = new Set(ids.map(normalize));
+			let changed = !store.archivedLoaded || next.size !== store.archived.size
+				|| [...next].some((id) => !store.archived.has(id));
+			store.archived = next;
+			store.archivedLoaded = true;
+			for (const id of store.selected.keys()) {
+				if (next.has(id)) continue;
+				store.selected.delete(id);
+				changed = true;
+			}
+			if (changed) emit();
+		};
+		const syncWorkspaceArchives = () => {
+			const snapshot = workspaceList?.getSnapshot();
+			if (Array.isArray(snapshot?.archivedSessionIds)) installArchived(snapshot.archivedSessionIds);
 		};
 
 		const post = (payload) =>
@@ -94,13 +114,14 @@ window.__ModuleLoader__.load({
 
 		const refreshList = () =>
 			win
-				.fetch(LIST_ROUTE)
-				.then((response) => response.json())
+				.fetch(LIST_ROUTE, { cache: "no-store" })
+				.then((response) => response.ok ? response.json() : null)
 				.then((value) => {
-					const rows = Array.isArray(value?.rows) ? value.rows : [];
-					store.archived = new Set(rows.map((row) => normalize(row.id)));
+					if (value?.ok === false || !Array.isArray(value?.rows)) return;
+					// HTTP supplies disk metadata, never a newer archive projection.
+					// An in-flight response may predate a just-confirmed DSH archive.
+					if (!workspaceList) installArchived(value.rows.map((row) => row.id));
 					store.orphans = Number.isFinite(value?.orphans) ? value.orphans : null;
-					store.archivedLoaded = true;
 					emit();
 				})
 				.catch(() => undefined);
@@ -387,8 +408,20 @@ window.__ModuleLoader__.load({
 			);
 		};
 
-		const inject = ["slots"];
+		const inject = ["slots", "workspaces"];
 		function apply(ctx) {
+			const list = ctx.workspaces?.list;
+			if (typeof list?.getSnapshot === "function" && typeof list?.subscribe === "function") {
+				ctx.effect(() => {
+					workspaceList = list;
+					const unsubscribe = list.subscribe(syncWorkspaceArchives);
+					syncWorkspaceArchives();
+					return () => {
+						unsubscribe();
+						workspaceList = null;
+					};
+				});
+			}
 			void refreshList();
 			ctx.slots.inject("sidebar.workspaces.session.row.action", () =>
 				ctx.slots.register(

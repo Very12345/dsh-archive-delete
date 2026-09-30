@@ -1,11 +1,11 @@
 {
   "name": "@very12345/dsh-archive-delete",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js && node selftest-entry.cjs"
   },
-  "description": "Delete a conversation straight from the DSH Web GUI sidebar row (per-row hover action), including its DSH archive-gate entry. Standalone and DSH-version-agnostic: no bridge or Feishu coupling.",
+  "description": "Delete archived DSH sessions with live Workspace-driven sidebar controls and archive-gate cleanup. Standalone with no bridge or Feishu coupling.",
   "license": "MIT",
   "author": "Very12345",
   "keywords": [
@@ -46,14 +46,21 @@
       "patch": "./cordis.patch.yml"
     },
     "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-workspace-controller"
+      ],
       "platform": "web"
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "*"
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-api-workspace-controller": "^0.2.0-rc.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-workspace-controller": {
       "optional": true
     }
   },

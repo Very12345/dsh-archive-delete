@@ -47,6 +47,7 @@ const reactStub = {
     return [slot.value, (next) => { slot.value = typeof next === "function" ? next(slot.value) : next; }];
   },
   useEffect() {},
+  useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot(); },
 };
 
 // eslint-disable-next-line no-eval
@@ -65,6 +66,11 @@ console.log("face:", { name: face.name, inject: face.inject, apply: typeof face.
 
 const seats = [];
 const ctx = {
+  effect: (callback) => callback(),
+  workspaces: { list: {
+    getSnapshot: () => ({ state: "ready", archivedSessionIds: [ARCHIVED_ID] }),
+    subscribe: () => () => {},
+  } },
   slots: {
     inject: (name, callback) => {
       callback();

@@ -1,6 +1,6 @@
 {
   "name": "@very12345/dsh-archive-delete",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js && node selftest-entry.cjs"
@@ -47,7 +47,8 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-api-workspace-controller"
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
     }

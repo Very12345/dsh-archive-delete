@@ -125,3 +125,7 @@ test('distinct run and task identities never share archive or deletion state',as
  const client=fixture(t,[first],undefined,{confirm:true,remove:()=>({ok:true,results:[{id:first,ok:true}]})});await flush();assert.ok(client.row(first));assert.equal(client.row(second),null);
  client.archived([first,second]);client.row(first).children[1].props.onClick({stopPropagation(){}});await flush();assert.ok(client.row(second));assert.doesNotMatch(client.stylesheet,/ijklmnop/);
 });
+
+test('pending deletions stay hidden after a client reload while the host still advertises the archived session',async t=>{
+ const client=fixture(t,['cached-id'],async()=>({ok:true,rows:[],orphans:0,deletedSessionIds:['cached-id'],pendingCleanup:['cached-id']}));await flush();assert.equal(client.row('cached-id'),null);assert.match(client.stylesheet,/session:cached-id/);client.archived(['cached-id']);assert.equal(client.row('cached-id'),null);
+});

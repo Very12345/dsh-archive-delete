@@ -11,7 +11,7 @@
 // Standalone: no bridge/Feishu coupling or DSH service imports. The native
 // registry is discovered on demand; older hosts retain the file-store fallback.
 // File locks and live store entries prevent deleting conversations in use.
-import { execFileSync } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
 import {
 	existsSync,
 	readFileSync,
@@ -23,6 +23,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, relative, isAbsolute, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { deletionBook } from "./deletion-book.js";
 
 export const name = "dsh-archive-delete";
 export const inject = ["webServer"];
@@ -84,11 +86,12 @@ const locate = (sessionId) => {
  * A live session holds its lock with flock(2), so acquiring it momentarily is
  * the test: success ⇒ nobody is driving it, failure ⇒ leave it alone.
  */
-const isLive = (dir) => {
+export const probeSessionLock = (dir, platform = process.platform, execute = execFileSync) => {
 	const lock = join(dir, LOCK_NAME);
 	if (!existsSync(lock)) return false;
 	try {
-		execFileSync("flock", ["-n", lock, "true"], { stdio: "ignore" });
+		if (platform === "win32") execute(join(process.env.SystemRoot || "C:/Windows", "System32/WindowsPowerShell/v1.0/powershell.exe"), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", fileURLToPath(new URL("./native/probe-session-lock.ps1", import.meta.url)), "-Path", lock], { stdio: "ignore", windowsHide: true, timeout: 3000 });
+		else execute("flock", ["-n", lock, "true"], { stdio: "ignore", windowsHide: true, timeout: 3000 });
 		return false;
 	} catch (error) {
 		// A missing flock binary cannot prove that an existing lock is idle.
@@ -168,6 +171,18 @@ const nativeRegistry = (ctx) => {
 		throw new Error("当前 DSH 工作区登记接口不兼容，未进行删除");
 	return registry;
 };
+const isLive = async (dir) => {
+	const lock=join(dir,LOCK_NAME);if(!existsSync(lock))return false;
+	const command=process.platform==="win32" ? join(process.env.SystemRoot||"C:/Windows","System32/WindowsPowerShell/v1.0/powershell.exe") : "flock";
+	const args=process.platform==="win32" ? ["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",fileURLToPath(new URL("./native/probe-session-lock.ps1",import.meta.url)),"-Path",lock] : ["-n",lock,"true"];
+	return new Promise(resolve=>execFile(command,args,{windowsHide:true,timeout:3000},error=>resolve(!!error)));
+};
+
+const isActive = async (ctx, id) => {
+	if (ctx?.get?.("agents")?.get?.(id)?.status === "running") return true;
+	if (typeof ctx?.waterfall === "function") return (await ctx.waterfall("workspace/session-activity", { sessionId: id }, () => Promise.resolve([]))).length > 0;
+	return false;
+};
 
 const removeRegistration = async (id, registry, ctx) => {
 	if (registry) {
@@ -184,30 +199,32 @@ const removeRegistration = async (id, registry, ctx) => {
 	try { ctx?.emit?.("api-session/removed", id); } catch (error) { ctx?.logger?.warn?.("删除后的会话列表通知失败：" + String(error)); }
 };
 
-const removeSession = async (sessionId, registry, ctx) => {
-	if (ctx?.get?.("sessions")?.get?.(sessionId)) return { ok: false, error: "该会话仍在宿主中使用，请先停止并关闭它再删除" };
+const removeSession = async (sessionId, registry, ctx, book, queued = false) => {
+	if (await isActive(ctx, sessionId)) return { ok: false, error: "该会话仍有任务正在执行或结束中，请先停止并等待任务结束" };
 	for (const workspace of registry?.list() ?? []) {
 		if (typeof workspace.detachSession !== "function")
 			throw new Error("当前 DSH 工作区不支持移除会话登记，未进行删除");
 	}
 	const found = locate(sessionId);
+	const resident = !!ctx?.get?.("sessions")?.get?.(sessionId);
+	if (resident || found && await isLive(found.dir) || ctx?.get?.("sessions")?.get?.(sessionId)) {
+		if (!queued) { book.mark(sessionId, "pending"); try { ctx?.emit?.("api-session/removed", sessionId); } catch {} }
+		return { ok: true, pending: true, message: "已从列表移除；宿主释放文件句柄后自动清理记录" };
+	}
+	if (!queued) book.mark(sessionId, "pending");
 	if (!found) {
 		await removeRegistration(sessionId, registry, ctx);
+		book.mark(sessionId, "deleted");
 		return {
 			ok: true,
 			message: "会话已不在磁盘上，已清理会话登记和列表",
-		};
-	}
-	if (isLive(found.dir)) {
-		return {
-			ok: false,
-			error: "该会话正在使用中（DSH 持有写锁），请先停止它再删除",
 		};
 	}
 	const scope = relative(resolve(sessionsRoot()), resolve(found.dir));
 	if (!scope || scope === ".." || scope.startsWith(".." + sep) || isAbsolute(scope)) throw new Error("会话目录不在当前 DSH 会话存储内");
 	rmSync(found.dir, { recursive: true, force: true });
 	await removeRegistration(sessionId, registry, ctx);
+	book.mark(sessionId, "deleted");
 	return {
 		ok: true,
 		message: `已删除 ${found.project}/${sessionId}（并清理会话登记）`,
@@ -215,13 +232,17 @@ const removeSession = async (sessionId, registry, ctx) => {
 };
 
 /** Every id is attempted; one live session must not block the rest. */
-const removeMany = async (ids, registry, ctx) => {
+const removeMany = async (ids, registry, ctx, book) => {
 	const results = [];
 	for (const id of ids) {
 		try {
-			const result = await removeSession(id, registry, ctx);
+			const result = await removeSession(id, registry, ctx, book);
 			results.push({ id, ...result });
 		} catch (error) {
+			if(book.entries.get(id)?.state==="pending"){
+				try{ctx?.emit?.("api-session/removed",id);}catch{}
+				results.push({id,ok:true,pending:true,message:"已进入清理队列，待宿主释放文件或存储恢复后自动完成"});continue;
+			}
 			results.push({
 				id,
 				ok: false,
@@ -255,17 +276,18 @@ const archivedGate = (registry) => {
 /** Session identities are opaque; different runs/tasks must never be conflated. */
 const gateKey = (id) => String(id ?? "").trim();
 
-const guardScope = (ids, force, registry) => {
+const guardScope = (ids, force, registry, book) => {
 	const gate = archivedGate(registry);
 	const allowed = new Set([...gate].map((id) => gateKey(id)));
+	for (const id of book.refresh().keys()) allowed.add(id);
 	if (force) return ids;
 	return ids.filter((id) => allowed.has(gateKey(id)));
 };
 
 /** Drop every gate entry whose session directory is already gone (list-only). */
-const pruneDangling = async (registry, ctx) => {
+const pruneDangling = async (registry, ctx, book) => {
 	const dangling = listArchived(registry).rows.filter((row) => !row.exists);
-	return { targets: dangling.map((row) => row.id), results: await removeMany(dangling.map((row) => row.id), registry, ctx) };
+	return { targets: dangling.map((row) => row.id), results: await removeMany(dangling.map((row) => row.id), registry, ctx, book) };
 };
 
 /** Archived ids with their on-disk state — copied from the bridge's route. */
@@ -282,7 +304,8 @@ const listArchived = (registry) => {
 	}
 	const rows = ids.map((id) => {
 		const found = locate(id);
-		return { id, exists: Boolean(found), live: found ? isLive(found.dir) : false };
+		// Listing must not start one OS probe per row; verify locks only on deletion.
+		return { id, exists: Boolean(found), live: found ? existsSync(join(found.dir, LOCK_NAME)) : false };
 	});
 	return { total: rows.length, orphans: rows.filter((row) => !row.exists).length, rows };
 };
@@ -290,8 +313,36 @@ const listArchived = (registry) => {
 export function apply(ctx) {
 	const webServer = ctx?.webServer;
 	if (!webServer) return;
+	const book = deletionBook(resolveDshHome());book.refresh();
 	let deleting = Promise.resolve();
+	let stopped = false;
 	const serialize = (action) => { const task = deleting.then(action); deleting = task.catch(() => {}); return task; };
+	let draining=null;
+	const drain = () => {
+		if(stopped || draining)return draining||Promise.resolve();
+		draining=(async()=>{
+			for(const record of [...book.refresh().values()])if(record.state==="pending" && !stopped){
+				await serialize(async()=>{
+					if(stopped || book.refresh().get(record.id)?.state!=="pending")return;
+					try{await removeSession(record.id,nativeRegistry(ctx),ctx,book,true);}catch(error){ctx?.logger?.warn?.("待清理会话暂未释放："+String(error));}
+				});
+			}
+		})().finally(()=>{draining=null;});return draining;
+	};
+	const backgroundDrain=()=>{void drain().catch(error=>ctx?.logger?.warn?.("会话清理队列读取失败："+String(error)));};
+	ctx.effect(() => {
+		backgroundDrain();const timer=setInterval(backgroundDrain,5000);timer.unref?.();
+		return async () => { stopped = true; clearInterval(timer); await deleting; };
+	}, "archive-delete: finish pending cleanup");
+	if (typeof ctx.on === "function") {
+		ctx.on("session/disposed", backgroundDrain);
+		ctx.on("agent/disposed", backgroundDrain);
+		ctx.on("agent/pre-step", (payload, next) => book.has(String(payload?.agent?.session?.id || payload?.agent?.id || "")) ? Promise.resolve({kind:"reject"}) : next());
+		ctx.on("session/created", session => {
+			const id=String(session.id);
+			if(book.has(id)){book.mark(id,"pending");throw new Error("该会话已删除，不能重新创建同一会话 ID");}
+		});
+	}
 
 	ctx.effect(
 		() =>
@@ -310,7 +361,7 @@ export function apply(ctx) {
 						// `op: "prune"` sweeps every gate entry whose session is already
 						// gone; `sessionIds` deletes a batch; `sessionId` one session.
 						if (String(body?.op ?? "") === "prune") {
-							const swept = await pruneDangling(registry, ctx);
+							const swept = await pruneDangling(registry, ctx, book);
 							sendJson(res, 200, {
 								ok: true,
 								pruned: swept.results.length,
@@ -328,7 +379,7 @@ export function apply(ctx) {
 						}
 						// Scope guard: only ARCHIVED conversations are deletable (the GUI
 						// only shows controls for those, and the API must agree).
-						const allowed = guardScope(ids, body?.force === true, registry);
+						const allowed = guardScope(ids, body?.force === true, registry, book);
 						const refused = ids
 							.filter((id) => !allowed.includes(id))
 							.map((id) => ({
@@ -336,7 +387,7 @@ export function apply(ctx) {
 								ok: false,
 								error: "该会话未归档，本插件只删除已归档的对话",
 							}));
-						const results = [...await removeMany(allowed, registry, ctx), ...refused];
+						const results = [...await removeMany(allowed, registry, ctx, book), ...refused];
 						const failed = results.filter((row) => !row.ok);
 						sendJson(res, 200, {
 							ok: failed.length === 0,
@@ -363,7 +414,9 @@ export function apply(ctx) {
 				path: "/plugins/dsh-archive-delete/list",
 				handler: (_req, res) => {
 					try {
-						sendJson(res, 200, { ok: true, ...listArchived(nativeRegistry(ctx)) });
+						const records=book.refresh(),archived=listArchived(nativeRegistry(ctx));
+						const rows=archived.rows.filter(row=>!records.has(row.id));
+						sendJson(res, 200, { ok: true, ...archived, total:rows.length, orphans:rows.filter(row=>!row.exists).length, rows, deletedSessionIds:[...records.keys()], pendingCleanup:[...records.values()].filter(row=>row.state==="pending").map(row=>row.id) });
 					} catch (error) {
 						sendJson(res, 500, {
 							ok: false,

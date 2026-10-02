@@ -54,6 +54,7 @@ window.__ModuleLoader__.load({
 			status: "",
 			busy: false,
 			orphans: null,
+			pendingCleanup: 0,
 		};
 		/** normalized id → the live row element (for hiding exactly that row). */
 		const rowNodes = new Map();
@@ -113,6 +114,10 @@ window.__ModuleLoader__.load({
 				.then((response) => response.ok ? response.json() : null)
 				.then((value) => {
 					if (value?.ok === false || !Array.isArray(value?.rows)) return;
+					const deleted = Array.isArray(value.deletedSessionIds) ? value.deletedSessionIds : [];
+					for (const id of deleted) { const key=normalize(id); store.deleted.add(key); store.selected.delete(key); }
+					hideRows(deleted);
+					store.pendingCleanup = Array.isArray(value.pendingCleanup) ? value.pendingCleanup.length : 0;
 					// HTTP supplies disk metadata, never a newer archive projection.
 					// An in-flight response may predate a just-confirmed DSH archive.
 					if (!workspaceList) installArchived(value.rows.map((row) => row.id));
@@ -177,10 +182,11 @@ window.__ModuleLoader__.load({
 					}
 					const done = applyDeleted(results);
 					const bad = results.filter((row) => !row.ok);
+					const pending = done.filter((row) => row.pending).length;
 					store.busy = false;
 					store.status = bad.length
 						? `已删除 ${done.length} 条，${bad.length} 条失败（${bad[0]?.error || "未知原因"}）`
-						: `已删除 ${done.length} 条`;
+						: pending ? `已从列表移除 ${done.length} 条，${pending} 条待宿主释放文件后自动清理` : `已删除 ${done.length} 条`;
 					emit();
 					// The gate list changed: refresh so the row's controls go away too.
 					void refreshList();
@@ -409,7 +415,8 @@ window.__ModuleLoader__.load({
               h('header',{className:'dshp-header'},h('div',{className:'dshp-title'},h('span',{className:'dshp-symbol'},h('svg',{width:22,height:22,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.7,'aria-hidden':true},h('path',{d:'M3 3h18v5H3zM5 8v13h14V8M9 12h6'}))),h('div',null,h('h2',null,'归档管理'),h('p',{className:'dshp-subtitle'},'整理不再需要的已归档对话。'))),h('span',{className:'dshp-status'},count+' 条归档')),
               h('section',{className:'dshp-section'},h('h3',{className:'dshp-heading'},'已归档对话'),h('div',{className:'dshp-panel'},h('div',{className:'dshp-row'},h('div',null,h('p',{className:'dshp-label'},'批量删除'),h('p',{className:'dshp-help'},'在侧栏归档列表中勾选对话后，可一次删除。')),h('button',{type:'button',className:'dshp-button dshp-danger',disabled:shared.busy||!shared.selected.size,onClick:()=>runDelete([...shared.selected.values()].map(item=>item.id),'这 '+shared.selected.size+' 个已归档对话')},shared.busy?'处理中…':'删除选中'+(shared.selected.size?' · '+shared.selected.size:'')))),h('p',{className:'dshp-footnote'},'仅处理已归档对话。永久删除前会再次确认。')),
               h('section',{className:'dshp-section'},h('h3',{className:'dshp-heading'},'维护'),h('div',{className:'dshp-panel'},h('div',{className:'dshp-row'},h('div',null,h('p',{className:'dshp-label'},'清理无效归档记录'),h('p',{className:'dshp-help'},'移除磁盘上已经不存在的会话登记，不删除现有文件。')),h('button',{type:'button',className:'dshp-button',disabled:shared.busy,onClick:runPrune},'清理'+(shared.orphans!==null?' · '+shared.orphans:''))))),
-              shared.status?h('p',{className:'dshp-footnote',role:'status'},shared.status):null);
+              shared.status?h('p',{className:'dshp-footnote',role:'status'},shared.status):null,
+              shared.pendingCleanup?h('p',{className:'dshp-footnote'},'待文件清理：'+shared.pendingCleanup+' 条。会话对象或写锁释放后自动完成。'):null);
         };
 
 		const inject = ["slots", "workspaces"];
@@ -417,6 +424,10 @@ window.__ModuleLoader__.load({
 			const sessions = ctx.get?.("sessions");
 			if (typeof sessions?.refresh === "function") refreshSessions = () => sessions.refresh();
 			ctx.effect(() => () => { win.document?.getElementById?.(STYLE_ID)?.remove(); rowNodes.clear(); });
+			ctx.effect(() => {
+				const timer=win.setInterval?.(()=>{if(store.pendingCleanup>0)void refreshList();},3000);timer?.unref?.();
+				return()=>{if(timer!==undefined)win.clearInterval?.(timer);};
+			});
 			const list = ctx.workspaces?.list;
 			if (typeof list?.getSnapshot === "function" && typeof list?.subscribe === "function") {
 				ctx.effect(() => {

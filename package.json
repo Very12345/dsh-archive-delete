@@ -1,6 +1,6 @@
 {
   "name": "@very12345/dsh-archive-delete",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js && node selftest-entry.cjs"
@@ -35,6 +35,8 @@
   "files": [
     "index.js",
     "client.js",
+    "deletion-book.js",
+    "native",
     "cordis.patch.yml",
     "selftest-entry.cjs",
     "README.md",

@@ -18,10 +18,14 @@ dsh plugin --profile desktop add github:Very12345/dsh-archive-delete
 ## 删除边界
 
 - 默认只删除已归档的会话，接口与 GUI 采用同一范围。
-- 删除会话目录，并更新 `storages/workspace.json` 中的 `global.archivedSessionIds`。
+- 删除会话目录，通过 DSH 原生 Workspace Registry 移除工作区成员、归档与置顶登记，并发布原生会话列表移除事件。服务不可用的旧宿主才使用文件登记兼容路径。
 - 会话存在锁时，使用 `flock` 探测是否仍被占用；无法确认锁已释放时拒绝删除。
 - Windows 没有 `flock` 时，对仍存在锁文件的会话保守拒绝；没有锁文件的已归档会话仍可删除。
+- 宿主内存中仍在使用的会话也会拒绝删除，不以缺少锁文件作为空闲的唯一依据。
 - 兼容 `session[.<format>].jsonl.zstd` 日志名称，不通过旧 DSH 版本常量判断格式。
+- 使用完整会话 ID 定位及同步，不合并不同 run/task 的记录；支持 DSH 的 `~XXXX` 目录编码。
+
+删除成功后会更新原生会话列表，并按稳定行标识隐藏旧缓存行；刚归档的会话、未挂载的行及侧栏重新渲染不依赖此前捕获的按钮节点。批量删除失败的条目继续保留控件，可以重试。
 
 宿主路由为 `/plugins/dsh-archive-delete/list` 和 `/plugins/dsh-archive-delete/delete`，以 exact route 注册。会话目录按照 `DSH_HOME`、`WEBAGENT_HOME/deepseek-harness`、`~/.dsh` 的顺序解析，已有部署仍可沿用显式目录。
 

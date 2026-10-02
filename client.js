@@ -39,17 +39,8 @@ window.__ModuleLoader__.load({
 		const LIST_ROUTE = "/plugins/dsh-archive-delete/list";
 		const STYLE_ID = "dsh-archive-delete-hide";
 
-		/**
-		 * The gate list keeps DSH session ids (`lark-link:dm:oc_x:<nonce>:<index>`),
-		 * and a row hands back the same identity — but a task-key suffix (`…#2`) or a
-		 * run nonce must not make the two sides mismatch, so both are normalized to
-		 * the conversation-level key before comparing.
-		 */
-		const normalize = (value) => {
-			let id = String(value ?? "").trim();
-			id = id.replace(/:[a-z0-9]{8,}:\d+$/, "");
-			return id.replace(/#\d+$/, "");
-		};
+		/** Keep the complete opaque Session identity, including task/run qualifiers. */
+		const normalize = (value) => String(value ?? "").trim();
 
 		// ---- shared state (module scope) -------------------------------------
 		const store = {
@@ -69,6 +60,7 @@ window.__ModuleLoader__.load({
 		const listeners = new Set();
 		let revision = 0;
 		let workspaceList = null;
+		let refreshSessions = () => Promise.resolve();
 		const subscribe = (notify) => {
 			listeners.add(notify);
 			return () => listeners.delete(notify);
@@ -140,8 +132,8 @@ window.__ModuleLoader__.load({
 			for (const id of ids) {
 				const key = normalize(id);
 				const node = rowNodes.get(key);
-				const value = node?.getAttribute?.("data-row-key") ?? null;
-				if (!value) continue;
+				// The exact stable key works even if the row was not mounted when deletion finished.
+				const value = node?.getAttribute?.("data-row-key") || `session:${key}`;
 				if (node?.style) node.style.setProperty("display", "none", "important");
 				if (store.deleted.has(`hidden:${value}`)) continue;
 				store.deleted.add(`hidden:${value}`);
@@ -155,6 +147,13 @@ window.__ModuleLoader__.load({
 				doc.head.appendChild(style);
 			}
 			style.textContent = `${style.textContent ?? ""}${rules.join("")}`;
+		};
+		const applyDeleted = (results) => {
+			const done = results.filter((row) => row.ok);
+			for (const row of done) { const key = normalize(row.id); store.deleted.add(key); store.selected.delete(key); }
+			hideRows(done.map((row) => row.id));
+			if (done.length) void Promise.resolve().then(refreshSessions).catch(() => undefined);
+			return done;
 		};
 
 		/** Delete N sessions in ONE request; failures do not block the successes. */
@@ -176,14 +175,8 @@ window.__ModuleLoader__.load({
 						emit();
 						return;
 					}
-					const done = results.filter((row) => row.ok);
+					const done = applyDeleted(results);
 					const bad = results.filter((row) => !row.ok);
-					for (const row of done) {
-						const key = normalize(row.id);
-						store.deleted.add(key);
-						store.selected.delete(key);
-					}
-					hideRows(done.map((row) => row.id));
 					store.busy = false;
 					store.status = bad.length
 						? `已删除 ${done.length} 条，${bad.length} 条失败（${bad[0]?.error || "未知原因"}）`
@@ -212,6 +205,7 @@ window.__ModuleLoader__.load({
 			emit();
 			void post({ op: "prune" })
 				.then(({ value }) => {
+					applyDeleted(Array.isArray(value?.results) ? value.results : []);
 					store.busy = false;
 					store.status = `已清理 ${Number(value?.removed ?? 0)} 条悬空条目`;
 					emit();
@@ -241,12 +235,13 @@ window.__ModuleLoader__.load({
 
 			// Remember our row element so a later delete can hide exactly this row.
 			R.useEffect(() => {
-				if (!key || isDeleted) return;
+				if (!key || isDeleted || !isArchived) return;
 				const node = ref.current;
 				const row =
 					(node && typeof node.closest === "function" ? node.closest("[data-row-key]") : null) ?? node;
 				if (row) rowNodes.set(key, row);
-			}, [key, isDeleted]);
+				return () => { if (rowNodes.get(key) === row) rowNodes.delete(key); };
+			}, [key, isDeleted, isArchived]);
 
 			// Archived only: a normal conversation must never grow a delete button.
 			if (!sessionId || isDeleted || !isArchived) return null;
@@ -419,6 +414,9 @@ window.__ModuleLoader__.load({
 
 		const inject = ["slots", "workspaces"];
 		function apply(ctx) {
+			const sessions = ctx.get?.("sessions");
+			if (typeof sessions?.refresh === "function") refreshSessions = () => sessions.refresh();
+			ctx.effect(() => () => { win.document?.getElementById?.(STYLE_ID)?.remove(); rowNodes.clear(); });
 			const list = ctx.workspaces?.list;
 			if (typeof list?.getSnapshot === "function" && typeof list?.subscribe === "function") {
 				ctx.effect(() => {

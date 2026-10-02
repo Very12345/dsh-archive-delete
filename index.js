@@ -8,10 +8,9 @@
 // row's hover card, and this half answers it with one HTTP route that removes the
 // session directory AND its archive entry.
 //
-// Deliberately standalone (no bridge/Feishu coupling, no DSH service imports):
-// the store is a plain directory tree and liveness is an flock probe, so the
-// plugin keeps working across DSH versions (v3/v4 log names are matched by
-// shape) and cannot break anyone else's load order.
+// Standalone: no bridge/Feishu coupling or DSH service imports. The native
+// registry is discovered on demand; older hosts retain the file-store fallback.
+// File locks and live store entries prevent deleting conversations in use.
 import { execFileSync } from "node:child_process";
 import {
 	existsSync,
@@ -23,7 +22,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, relative, isAbsolute, sep } from "node:path";
 
 export const name = "dsh-archive-delete";
 export const inject = ["webServer"];
@@ -43,7 +42,7 @@ const resolveDshHome = () => {
 
 /** Directory names encode the id (`lark-link:…` → `lark-link~003A…`). */
 const decodeDirName = (dirName) =>
-	dirName.replace(/~([0-9a-fA-F]{6})/g, (_all, hex) =>
+	dirName.replace(/~([0-9a-fA-F]{4})/g, (_all, hex) =>
 		String.fromCharCode(Number.parseInt(hex, 16)),
 	);
 
@@ -101,7 +100,7 @@ const isLive = (dir) => {
 
 const registryPath = () => join(resolveDshHome(), "storages", "workspace.json");
 
-/** Drop the id from DSH's archive gate list, preserving every other key. */
+/** Legacy fallback: remove this identity from archives, pins and workspace membership. */
 const unarchive = (sessionId) => {
 	const file = registryPath();
 	let registry;
@@ -116,8 +115,20 @@ const unarchive = (sessionId) => {
 		? global.archivedSessionIds.map(String)
 		: [];
 	const kept = ids.filter((id) => id !== sessionId);
-	if (kept.length === ids.length) return false;
+	let changed = kept.length !== ids.length;
 	global.archivedSessionIds = kept;
+	if (Array.isArray(global.pinnedSessionIds)) {
+		const pinned = global.pinnedSessionIds.filter((id) => id !== sessionId);
+		changed ||= pinned.length !== global.pinnedSessionIds.length;
+		global.pinnedSessionIds = pinned;
+	}
+	for (const record of Object.values(registry.tables?.workspaces ?? {})) {
+		if (!Array.isArray(record?.sessionIds)) continue;
+		const members = record.sessionIds.filter((id) => id !== sessionId);
+		changed ||= members.length !== record.sessionIds.length;
+		record.sessionIds = members;
+	}
+	if (!changed) return false;
 	const tmp = `${file}.archive-delete-write`;
 	writeFileSync(tmp, JSON.stringify({ ...registry, global }, null, 2));
 	renameSync(tmp, file);
@@ -149,15 +160,42 @@ const readJson = (req) =>
 		req?.on?.("error", () => resolve({}));
 	});
 
-const removeSession = (sessionId) => {
+/** Use the live registry's durable writes so its caches and Workspace feed agree. */
+const nativeRegistry = (ctx) => {
+	const registry = ctx?.get?.("workspaceRegistry");
+	if (!registry) return undefined;
+	if (!Array.isArray(registry.archivedSessionIds) || typeof registry.list !== "function" || typeof registry.unarchiveSession !== "function")
+		throw new Error("当前 DSH 工作区登记接口不兼容，未进行删除");
+	return registry;
+};
+
+const removeRegistration = async (id, registry, ctx) => {
+	if (registry) {
+		for (const workspace of registry.list()) {
+			if (typeof workspace.detachSession !== "function") throw new Error("当前 DSH 工作区不支持移除会话登记");
+			// The public sessionIds view can already filter a missing log; detach still
+			// removes its durable accounting slot, and is a no-op for other workspaces.
+			await workspace.detachSession(id);
+		}
+		await registry.unpinSession?.(id);
+		await registry.unarchiveSession(id);
+	} else unarchive(id);
+	// Official Session Controller relays this event to every connected session list.
+	try { ctx?.emit?.("api-session/removed", id); } catch (error) { ctx?.logger?.warn?.("删除后的会话列表通知失败：" + String(error)); }
+};
+
+const removeSession = async (sessionId, registry, ctx) => {
+	if (ctx?.get?.("sessions")?.get?.(sessionId)) return { ok: false, error: "该会话仍在宿主中使用，请先停止并关闭它再删除" };
+	for (const workspace of registry?.list() ?? []) {
+		if (typeof workspace.detachSession !== "function")
+			throw new Error("当前 DSH 工作区不支持移除会话登记，未进行删除");
+	}
 	const found = locate(sessionId);
 	if (!found) {
-		const ungated = unarchive(sessionId);
+		await removeRegistration(sessionId, registry, ctx);
 		return {
 			ok: true,
-			message: ungated
-				? "会话已不在磁盘上，已顺手清理它的归档条目"
-				: "该会话已不存在（磁盘与归档列表都没有）",
+			message: "会话已不在磁盘上，已清理会话登记和列表",
 		};
 	}
 	if (isLive(found.dir)) {
@@ -166,28 +204,33 @@ const removeSession = (sessionId) => {
 			error: "该会话正在使用中（DSH 持有写锁），请先停止它再删除",
 		};
 	}
+	const scope = relative(resolve(sessionsRoot()), resolve(found.dir));
+	if (!scope || scope === ".." || scope.startsWith(".." + sep) || isAbsolute(scope)) throw new Error("会话目录不在当前 DSH 会话存储内");
 	rmSync(found.dir, { recursive: true, force: true });
-	const ungated = unarchive(sessionId);
+	await removeRegistration(sessionId, registry, ctx);
 	return {
 		ok: true,
-		message: `已删除 ${found.project}/${sessionId}${ungated ? "（并清理归档条目）" : ""}`,
+		message: `已删除 ${found.project}/${sessionId}（并清理会话登记）`,
 	};
 };
 
 /** Every id is attempted; one live session must not block the rest. */
-const removeMany = (ids) =>
-	ids.map((id) => {
+const removeMany = async (ids, registry, ctx) => {
+	const results = [];
+	for (const id of ids) {
 		try {
-			const result = removeSession(id);
-			return { id, ...result };
+			const result = await removeSession(id, registry, ctx);
+			results.push({ id, ...result });
 		} catch (error) {
-			return {
+			results.push({
 				id,
 				ok: false,
 				error: error instanceof Error ? error.message : "删除失败",
-			};
+			});
 		}
-	});
+	}
+	return results;
+};
 
 /**
  * Deletion is for ARCHIVED conversations only — that is the plugin's whole scope,
@@ -196,7 +239,8 @@ const removeMany = (ids) =>
  * session store could be erased through the route (which is how a live session
  * got removed during verification).
  */
-const archivedGate = () => {
+const archivedGate = (registry) => {
+	if (registry) return new Set(registry.archivedSessionIds.map(String));
 	const ids = new Set();
 	try {
 		const registry = JSON.parse(readFileSync(registryPath(), "utf8"));
@@ -208,33 +252,31 @@ const archivedGate = () => {
 	return ids;
 };
 
-/** Compare generously: the gate stores the run-qualified id, callers may not. */
-const gateKey = (id) => {
-	let value = String(id ?? "").trim();
-	value = value.replace(/:[a-z0-9]{8,}:\d+$/, "");
-	return value.replace(/#\d+$/, "");
-};
+/** Session identities are opaque; different runs/tasks must never be conflated. */
+const gateKey = (id) => String(id ?? "").trim();
 
-const guardScope = (ids, force) => {
-	const gate = archivedGate();
+const guardScope = (ids, force, registry) => {
+	const gate = archivedGate(registry);
 	const allowed = new Set([...gate].map((id) => gateKey(id)));
 	if (force) return ids;
 	return ids.filter((id) => allowed.has(gateKey(id)));
 };
 
 /** Drop every gate entry whose session directory is already gone (list-only). */
-const pruneDangling = () => {
-	const dangling = listArchived().rows.filter((row) => !row.exists);
-	return { targets: dangling.map((row) => row.id), results: removeMany(dangling.map((row) => row.id)) };
+const pruneDangling = async (registry, ctx) => {
+	const dangling = listArchived(registry).rows.filter((row) => !row.exists);
+	return { targets: dangling.map((row) => row.id), results: await removeMany(dangling.map((row) => row.id), registry, ctx) };
 };
 
 /** Archived ids with their on-disk state — copied from the bridge's route. */
-const listArchived = () => {
-	let ids = [];
+const listArchived = (registry) => {
+	let ids = registry ? [...registry.archivedSessionIds] : [];
 	try {
+		if (!registry) {
 		const registry = JSON.parse(readFileSync(registryPath(), "utf8"));
 		const raw = registry?.global?.archivedSessionIds;
 		if (Array.isArray(raw)) ids = raw.map(String);
+		}
 	} catch {
 		// no registry yet
 	}
@@ -248,6 +290,8 @@ const listArchived = () => {
 export function apply(ctx) {
 	const webServer = ctx?.webServer;
 	if (!webServer) return;
+	let deleting = Promise.resolve();
+	const serialize = (action) => { const task = deleting.then(action); deleting = task.catch(() => {}); return task; };
 
 	ctx.effect(
 		() =>
@@ -260,11 +304,13 @@ export function apply(ctx) {
 						return;
 					}
 					const body = await readJson(req);
+					await serialize(async () => {
 					try {
+						const registry = nativeRegistry(ctx);
 						// `op: "prune"` sweeps every gate entry whose session is already
 						// gone; `sessionIds` deletes a batch; `sessionId` one session.
 						if (String(body?.op ?? "") === "prune") {
-							const swept = pruneDangling();
+							const swept = await pruneDangling(registry, ctx);
 							sendJson(res, 200, {
 								ok: true,
 								pruned: swept.results.length,
@@ -282,7 +328,7 @@ export function apply(ctx) {
 						}
 						// Scope guard: only ARCHIVED conversations are deletable (the GUI
 						// only shows controls for those, and the API must agree).
-						const allowed = guardScope(ids, body?.force === true);
+						const allowed = guardScope(ids, body?.force === true, registry);
 						const refused = ids
 							.filter((id) => !allowed.includes(id))
 							.map((id) => ({
@@ -290,7 +336,7 @@ export function apply(ctx) {
 								ok: false,
 								error: "该会话未归档，本插件只删除已归档的对话",
 							}));
-						const results = [...removeMany(allowed), ...refused];
+						const results = [...await removeMany(allowed, registry, ctx), ...refused];
 						const failed = results.filter((row) => !row.ok);
 						sendJson(res, 200, {
 							ok: failed.length === 0,
@@ -304,6 +350,7 @@ export function apply(ctx) {
 							error: error instanceof Error ? error.message : "删除失败",
 						});
 					}
+					});
 				},
 			}),
 		"dsh-archive-delete: delete route",
@@ -316,7 +363,7 @@ export function apply(ctx) {
 				path: "/plugins/dsh-archive-delete/list",
 				handler: (_req, res) => {
 					try {
-						sendJson(res, 200, { ok: true, ...listArchived() });
+						sendJson(res, 200, { ok: true, ...listArchived(nativeRegistry(ctx)) });
 					} catch (error) {
 						sendJson(res, 500, {
 							ok: false,

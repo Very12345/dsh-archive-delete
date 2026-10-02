@@ -1,11 +1,11 @@
 {
   "name": "@very12345/dsh-archive-delete",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js && node selftest-entry.cjs"
   },
-  "description": "Delete archived DSH sessions with live Workspace-driven sidebar controls and archive-gate cleanup. Standalone with no bridge or Feishu coupling.",
+  "description": "Delete archived DSH sessions with native registry and session-list synchronization, immediate sidebar removal and batch controls.",
   "license": "MIT",
   "author": "Very12345",
   "keywords": [

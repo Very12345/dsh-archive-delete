@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, orphans: 0 })) {
+function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, orphans: 0 }), options = {}) {
   let loaded;
   let snapshot = { state: 'ready', archivedSessionIds: [...ids] };
   const workspaceListeners = new Set();
@@ -20,18 +20,23 @@ function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, or
     useSyncExternalStore: (subscribe, getSnapshot) => { effects.push(subscribe(() => { renders += 1; })); return getSnapshot(); }
   };
   let requests = 0;
+  let refreshes = 0;
+  const styles = new Map();
+  const document = { head: { appendChild: style => styles.set(style.id, style) }, getElementById: id => styles.get(id), createElement: () => ({ remove() { styles.delete(this.id); } }) };
   const sandbox = {
     console,
-    confirm: () => false,
+    confirm: () => !!options.confirm,
+    document,
     addEventListener: (name, callback) => events.set(name, callback),
     removeEventListener: (name) => events.delete(name),
-    fetch: async () => { requests += 1; return { ok: true, json: fetchList }; },
+    fetch: async (_url, init) => { requests += 1; return { ok: true, json: init?.method === 'POST' ? async () => options.remove(JSON.parse(init.body)) : fetchList }; },
     __ModuleLoader__: { load: (value) => { loaded = value; } }
   };
   sandbox.window = sandbox;
   vm.runInNewContext(fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8'), sandbox);
   const face = loaded.factory((name) => { assert.equal(name, 'react'); return react; });
   face.apply({
+    get: name => name === 'sessions' ? { refresh: async () => { refreshes++; } } : undefined,
     workspaces: { list: {
       getSnapshot: () => snapshot,
       subscribe: (callback) => { workspaceListeners.add(callback); return () => workspaceListeners.delete(callback); }
@@ -46,6 +51,8 @@ function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, or
     bar: () => seats.get('shell.overlay')({}),
     archived: (next) => { snapshot = { ...snapshot, archivedSessionIds: [...next] }; for (const callback of workspaceListeners) callback(); },
     get requests() { return requests; },
+    get refreshes() { return refreshes; },
+    get stylesheet() { return styles.get('dsh-archive-delete-hide')?.textContent ?? ''; },
     get renders() { return renders; },
     get subscriptions() { return workspaceListeners.size; },
     dispose
@@ -95,4 +102,26 @@ test('disposing the plugin removes its Workspace subscription', (t) => {
   assert.equal(client.subscriptions, 1);
   client.dispose();
   assert.equal(client.subscriptions, 0);
+});
+
+test('deleting a newly archived session with no captured DOM node hides its stable row and refreshes the native list',async t=>{
+ const client=fixture(t,[],undefined,{confirm:true,remove:()=>({ok:true,results:[{id:'new-chat',ok:true}]})});
+ await flush();assert.equal(client.row('new-chat'),null);client.archived(['new-chat']);
+ client.row('new-chat').children[1].props.onClick({stopPropagation(){}});await flush();
+ assert.equal(client.row('new-chat'),null);assert.match(client.stylesheet,/data-row-key="session:new-chat"/);assert.equal(client.refreshes,1);
+ client.archived(['new-chat']);assert.equal(client.row('new-chat'),null,'a stale archive projection must not resurrect the deleted controls');
+});
+
+test('partial batch deletion hides only successful identities and keeps failed rows usable',async t=>{
+ const client=fixture(t,['good','bad'],undefined,{confirm:true,remove:()=>({ok:false,results:[{id:'good',ok:true},{id:'bad',ok:false,error:'Locked'}]})});
+ await flush();client.row('good').children[0].props.onChange({stopPropagation(){}});client.row('bad').children[0].props.onChange({stopPropagation(){}});
+ const button=node=>Array.isArray(node)?node.map(button).find(Boolean):node?.props?.key==='delete'?node:node?.children?.map(button).find(Boolean);
+ button(client.bar()).props.onClick();await flush();
+ assert.equal(client.row('good'),null);assert.ok(client.row('bad'));assert.match(client.stylesheet,/session:good/);assert.doesNotMatch(client.stylesheet,/session:bad/);
+});
+
+test('distinct run and task identities never share archive or deletion state',async t=>{
+ const first='lark:chat:abcdefgh:0#1',second='lark:chat:ijklmnop:1#2';
+ const client=fixture(t,[first],undefined,{confirm:true,remove:()=>({ok:true,results:[{id:first,ok:true}]})});await flush();assert.ok(client.row(first));assert.equal(client.row(second),null);
+ client.archived([first,second]);client.row(first).children[1].props.onClick({stopPropagation(){}});await flush();assert.ok(client.row(second));assert.doesNotMatch(client.stylesheet,/ijklmnop/);
 });

@@ -25,7 +25,7 @@ function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, or
   const document = { head: { appendChild: style => styles.set(style.id, style) }, getElementById: id => styles.get(id), createElement: () => ({ remove() { styles.delete(this.id); } }) };
   const sandbox = {
     console,
-    confirm: () => !!options.confirm,
+    confirm: () => { throw new Error('blocking native confirmation must not be used'); },
     document,
     addEventListener: (name, callback) => events.set(name, callback),
     removeEventListener: (name) => events.delete(name),
@@ -34,7 +34,11 @@ function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, or
   };
   sandbox.window = sandbox;
   vm.runInNewContext(fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8'), sandbox);
-  const face = loaded.factory((name) => { assert.equal(name, 'react'); return react; });
+  const face = loaded.factory((name) => {
+    if (name === 'react') return react;
+    assert.equal(name, '@deepseek-ai/dsh-client-ui-primitives');
+    return { Modal: 'HostModal', Button: 'HostButton' };
+  });
   face.apply({
     get: name => name === 'sessions' ? { refresh: async () => { refreshes++; } } : undefined,
     workspaces: { list: {
@@ -42,13 +46,16 @@ function fixture(t, ids = [], fetchList = async () => ({ ok: true, rows: ids, or
       subscribe: (callback) => { workspaceListeners.add(callback); return () => workspaceListeners.delete(callback); }
     } },
     effect: (callback) => { const dispose = callback(); if (typeof dispose === 'function') effects.push(dispose); },
-    slots: { inject: (_name, callback) => callback(), register: (meta, component) => seats.set(meta.name, component) }
+    slots: { inject: (_name, callback) => callback(), register: (meta, component) => seats.set(meta.id === 'dsh-archive-delete-confirm' ? meta.id : meta.name, component) }
   });
   const dispose = () => { for (const cleanup of effects.splice(0).reverse()) cleanup(); };
   t.after(dispose);
   return {
     row: (id) => seats.get('sidebar.workspaces.session.row.action')({ sessionId: id, displayTitle: id }),
     bar: () => seats.get('shell.overlay')({}),
+    dialog: () => seats.get('dsh-archive-delete-confirm')({}),
+    accept: () => seats.get('dsh-archive-delete-confirm')({})?.props.footer.children[1].props.onClick(),
+    cancel: () => seats.get('dsh-archive-delete-confirm')({})?.props.onClose(),
     archived: (next) => { snapshot = { ...snapshot, archivedSessionIds: [...next] }; for (const callback of workspaceListeners) callback(); },
     get requests() { return requests; },
     get refreshes() { return refreshes; },
@@ -105,27 +112,78 @@ test('disposing the plugin removes its Workspace subscription', (t) => {
 });
 
 test('deleting a newly archived session with no captured DOM node hides its stable row and refreshes the native list',async t=>{
- const client=fixture(t,[],undefined,{confirm:true,remove:()=>({ok:true,results:[{id:'new-chat',ok:true}]})});
+ const client=fixture(t,[],undefined,{remove:()=>({ok:true,results:[{id:'new-chat',ok:true}]})});
  await flush();assert.equal(client.row('new-chat'),null);client.archived(['new-chat']);
- client.row('new-chat').children[1].props.onClick({stopPropagation(){}});await flush();
+ client.row('new-chat').children[1].props.onClick({stopPropagation(){}});client.accept();await flush();
  assert.equal(client.row('new-chat'),null);assert.match(client.stylesheet,/data-row-key="session:new-chat"/);assert.equal(client.refreshes,1);
  client.archived(['new-chat']);assert.equal(client.row('new-chat'),null,'a stale archive projection must not resurrect the deleted controls');
 });
 
 test('partial batch deletion hides only successful identities and keeps failed rows usable',async t=>{
- const client=fixture(t,['good','bad'],undefined,{confirm:true,remove:()=>({ok:false,results:[{id:'good',ok:true},{id:'bad',ok:false,error:'Locked'}]})});
+ const client=fixture(t,['good','bad'],undefined,{remove:()=>({ok:false,results:[{id:'good',ok:true},{id:'bad',ok:false,error:'Locked'}]})});
  await flush();client.row('good').children[0].props.onChange({stopPropagation(){}});client.row('bad').children[0].props.onChange({stopPropagation(){}});
  const button=node=>Array.isArray(node)?node.map(button).find(Boolean):node?.props?.key==='delete'?node:node?.children?.map(button).find(Boolean);
- button(client.bar()).props.onClick();await flush();
+ button(client.bar()).props.onClick();client.accept();await flush();
  assert.equal(client.row('good'),null);assert.ok(client.row('bad'));assert.match(client.stylesheet,/session:good/);assert.doesNotMatch(client.stylesheet,/session:bad/);
 });
 
 test('distinct run and task identities never share archive or deletion state',async t=>{
  const first='lark:chat:abcdefgh:0#1',second='lark:chat:ijklmnop:1#2';
- const client=fixture(t,[first],undefined,{confirm:true,remove:()=>({ok:true,results:[{id:first,ok:true}]})});await flush();assert.ok(client.row(first));assert.equal(client.row(second),null);
- client.archived([first,second]);client.row(first).children[1].props.onClick({stopPropagation(){}});await flush();assert.ok(client.row(second));assert.doesNotMatch(client.stylesheet,/ijklmnop/);
+ const client=fixture(t,[first],undefined,{remove:()=>({ok:true,results:[{id:first,ok:true}]})});await flush();assert.ok(client.row(first));assert.equal(client.row(second),null);
+ client.archived([first,second]);client.row(first).children[1].props.onClick({stopPropagation(){}});client.accept();await flush();assert.ok(client.row(second));assert.doesNotMatch(client.stylesheet,/ijklmnop/);
 });
 
 test('pending deletions stay hidden after a client reload while the host still advertises the archived session',async t=>{
  const client=fixture(t,['cached-id'],async()=>({ok:true,rows:[],orphans:0,deletedSessionIds:['cached-id'],pendingCleanup:['cached-id']}));await flush();assert.equal(client.row('cached-id'),null);assert.match(client.stylesheet,/session:cached-id/);client.archived(['cached-id']);assert.equal(client.row('cached-id'),null);
+});
+
+test('native in-page confirmation gates deletion and cancellation leaves the conversation intact', async t => {
+  let posts = 0;
+  const client = fixture(t, ['keep'], undefined, {remove: () => { posts++; return {}; }});
+  await flush();
+  client.row('keep').children[1].props.onClick({stopPropagation(){}});
+  const dialog = client.dialog();
+  assert.equal(dialog.type, 'HostModal');
+  assert.equal(dialog.props.open, true);
+  assert.equal(dialog.props.closeLabel, '取消');
+  assert.equal(dialog.props.footer.children[0].props['data-modal-autofocus'], true);
+  await flush();
+  assert.equal(posts, 0, 'opening a dialog must not send a delete request');
+  client.cancel();
+  assert.equal(client.dialog(), null);
+  assert.ok(client.row('keep'));
+  assert.equal(client.stylesheet, '');
+  assert.equal(posts, 0);
+});
+
+test('confirmation captures exact selected identities and cannot submit twice', async t => {
+  const sent = [];
+  const client = fixture(t, ['first', 'second'], undefined, {remove: body => {
+    sent.push(body.sessionIds);
+    return {ok:true,results:body.sessionIds.map(id=>({id,ok:true}))};
+  }});
+  await flush();
+  client.row('first').children[1].props.onClick({stopPropagation(){}});
+  const confirm = client.dialog().props.footer.children[1].props.onClick;
+  client.row('second').children[1].props.onClick({stopPropagation(){}});
+  confirm(); confirm();
+  await flush();
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [['first']]);
+  assert.ok(client.row('second'));
+  assert.equal(client.dialog(), null);
+});
+
+test('orphan cleanup also uses an in-page confirmation and can be cancelled', async t => {
+  let posts = 0;
+  const client = fixture(t, ['keep'], undefined, {remove:()=>{posts++;return {ok:true,removed:0};}});
+  await flush();
+  client.row('keep').children[0].props.onChange({stopPropagation(){}});
+  const prune = client.bar().children[0].find(node=>node?.props?.key==='prune');
+  prune.props.onClick();
+  assert.equal(client.dialog().type, 'HostModal');
+  client.cancel();
+  assert.equal(posts, 0);
+  prune.props.onClick();client.accept();await flush();
+  assert.equal(posts, 1);
+  assert.ok(client.row('keep'));
 });

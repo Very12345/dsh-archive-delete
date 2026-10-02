@@ -60,6 +60,7 @@ console.log("entry id:", captured.id, "| factory:", typeof captured.factory);
 
 const face = captured.factory((spec) => {
   if (spec === "react") return reactStub;
+  if (spec === "@deepseek-ai/dsh-client-ui-primitives") return { Modal: 'HostModal', Button: 'HostButton' };
   throw new Error(`unexpected require: ${spec}`);
 });
 console.log("face:", { name: face.name, inject: face.inject, apply: typeof face.apply });

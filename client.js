@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
 	id: "@very12345/dsh-archive-delete",
 	factory: (require) => {
 		const R = require("react");
+		const { Modal, Button } = require("@deepseek-ai/dsh-client-ui-primitives");
 		const h = R.createElement;
 		const SETTINGS_CSS = "\n.dshp-page{--sp-text:var(--dsw-alias-label-primary,#20242c);--sp-muted:var(--dsw-alias-label-secondary,#69717f);--sp-border:var(--dsw-alias-border-l3,#e4e7ec);--sp-bg:var(--dsw-alias-bg-layer-2,#fff);--sp-soft:var(--dsw-alias-bg-layer-3,#f7f8fa);--sp-accent:#3d64df;color:var(--sp-text);width:100%;max-width:720px;padding:12px 0 32px;font-family:inherit;font-size:14px;line-height:1.5}\n.dshp-page *{box-sizing:border-box}.dshp-header{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:28px}.dshp-title{display:flex;align-items:center;gap:14px}.dshp-symbol{display:grid;place-items:center;flex:none;width:44px;height:44px;border:1px solid var(--sp-border);border-radius:13px;background:var(--sp-soft);font-size:20px}.dshp-page h2{font-size:18px;font-weight:600;line-height:1.5;letter-spacing:normal;margin:0}.dshp-subtitle{color:var(--sp-muted);font-size:13px;margin:5px 0 0}.dshp-status{display:inline-flex;align-items:center;gap:7px;color:var(--sp-muted);font-size:12px;white-space:nowrap;border:1px solid var(--sp-border);border-radius:20px;padding:5px 10px}.dshp-dot{width:6px;height:6px;flex:none;border-radius:50%;background:#969eab}.dshp-status[data-ok=true] .dshp-dot{background:#21936a}.dshp-status[data-warn=true] .dshp-dot{background:#c58c2e}\n.dshp-section{margin-top:26px}.dshp-heading{color:var(--sp-muted);font-weight:600;font-size:13px;margin:0 0 10px}.dshp-panel{background:var(--sp-bg);border:1px solid var(--sp-border);border-radius:12px;overflow:hidden}.dshp-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px}.dshp-row+.dshp-row{border-top:1px solid var(--sp-border)}.dshp-label{font-weight:550;font-size:14px;margin:0}.dshp-help{font-size:12px;color:var(--sp-muted);line-height:1.65;margin:4px 0 0}.dshp-page button,.dshp-page input,.dshp-page select{font:inherit}.dshp-page button{cursor:pointer}.dshp-page button:disabled{cursor:default;opacity:.45}.dshp-page button:focus-visible,.dshp-page input:focus-visible,.dshp-page select:focus-visible{outline:3px solid #8ba9ff;outline-offset:3px}.dshp-switch{position:relative;flex:none;width:40px;height:24px;border:0;border-radius:20px;padding:3px;background:#a0a7b2}.dshp-switch[aria-checked=true]{background:var(--sp-accent)}.dshp-knob{display:block;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0002;transform:translateX(0);transition:transform .15s}.dshp-switch[aria-checked=true] .dshp-knob{transform:translateX(16px)}\n.dshp-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;border:1px solid var(--sp-border);background:var(--sp-bg);color:var(--sp-text);border-radius:7px;padding:7px 12px;font-size:12px!important}.dshp-button:hover{background:var(--sp-soft)}.dshp-primary{background:var(--sp-accent)!important;border-color:var(--sp-accent)!important;color:white!important}.dshp-danger{color:var(--dsw-alias-label-error,#c73f38)}.dshp-footnote{color:var(--sp-muted);font-size:12px;line-height:1.65;margin:12px 2px 0}.dshp-error{color:var(--dsw-alias-label-error,#c73f38);background:var(--sp-soft);border:1px solid var(--sp-border);padding:12px 14px;border-radius:8px;font-size:12px;margin-top:14px}.dshp-footer{font-size:11px;color:var(--sp-muted);margin-top:18px}.dshp-empty{font-size:12px;color:var(--sp-muted);padding:20px}.dshp-option{width:100%;display:flex;align-items:center;gap:12px;text-align:left;padding:14px;border:1px solid transparent;background:transparent;color:var(--sp-text);border-radius:8px}.dshp-option[aria-checked=true]{background:var(--sp-soft);border-color:var(--sp-border)}.dshp-option-copy{flex:1}.dshp-radio{width:16px;height:16px;border:1.5px solid #9ca5b3;border-radius:50%;display:grid;place-items:center;flex:none}.dshp-option[aria-checked=true] .dshp-radio{border-color:var(--sp-accent)}.dshp-option[aria-checked=true] .dshp-radio:after{content:'';width:8px;height:8px;border-radius:50%;background:var(--sp-accent)}.dshp-options{padding:6px}.dshp-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.dshp-tags{display:flex;gap:7px;flex-wrap:wrap}.dshp-tag{font-size:12px;color:var(--sp-muted);background:var(--sp-soft);border:1px solid var(--sp-border);padding:4px 9px;border-radius:6px}.dshp-form{padding:20px;border-top:1px solid var(--sp-border);display:grid;gap:12px}.dshp-page input:not([type=checkbox]),.dshp-page select{min-height:36px;border:1px solid var(--sp-border)!important;border-radius:7px!important;background:var(--sp-bg)!important;color:var(--sp-text)!important;padding:7px 10px!important;font:inherit!important}.dshp-page input[type=checkbox]{accent-color:var(--sp-accent);width:15px;height:15px;flex:none}.dshp-disclosure{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;text-align:left;background:transparent;border:0;color:var(--sp-text);padding:20px;font-size:14px;font-weight:550}.dshp-disclosure span:last-child{color:var(--sp-muted)}.dshp-user{padding:14px 20px}.dshp-user+.dshp-user{border-top:1px solid var(--sp-border)}.dshp-user summary{cursor:pointer;list-style:none}.dshp-user summary::-webkit-details-marker{display:none}.dshp-user summary:after{content:'\u203a';float:right;color:var(--sp-muted)}.dshp-user[open] summary:after{content:'\u2304'}.dshp-user-meta{color:var(--sp-muted);font-size:12px;overflow-wrap:anywhere;margin-top:6px}\n@media(max-width:520px){.dshp-page h2{font-size:18px}.dshp-header{align-items:flex-start;gap:10px}.dshp-subtitle{max-width:220px}.dshp-symbol{width:38px;height:38px}.dshp-row,.dshp-form,.dshp-disclosure{padding:16px}.dshp-row{gap:12px}.dshp-status{font-size:11px}}\n@media(prefers-reduced-motion:reduce){.dshp-knob{transition:none}}\n";
 		const win = globalThis;
@@ -55,6 +56,7 @@ window.__ModuleLoader__.load({
 			busy: false,
 			orphans: null,
 			pendingCleanup: 0,
+			confirmation: null,
 		};
 		/** normalized id → the live row element (for hiding exactly that row). */
 		const rowNodes = new Map();
@@ -163,11 +165,15 @@ window.__ModuleLoader__.load({
 
 		/** Delete N sessions in ONE request; failures do not block the successes. */
 		const runDelete = (ids, label) => {
-			if (store.busy || ids.length === 0) return;
-			const confirmed = win.confirm?.(
-				`永久删除${label}？\n\n${ids.length} 条会话记录会从磁盘删除，无法恢复。`,
-			);
-			if (!confirmed) return;
+			if (store.busy || store.confirmation || ids.length === 0) return;
+			store.confirmation = {
+				kind: "delete", ids: [...ids],
+				title: `永久删除${label}？`,
+				description: `${ids.length} 条会话记录会从磁盘删除，无法恢复。`,
+			};
+			emit();
+		};
+		const deleteConfirmed = (ids) => {
 			store.busy = true;
 			store.status = `正在删除 ${ids.length} 条…`;
 			emit();
@@ -200,12 +206,15 @@ window.__ModuleLoader__.load({
 		};
 
 		const runPrune = () => {
-			if (store.busy) return;
+			if (store.busy || store.confirmation) return;
 			const count = store.orphans == null ? "" : `${store.orphans} 条`;
-			const confirmed = win.confirm?.(
-				`清理${count}悬空归档条目？\n\n这些会话在磁盘上已不存在，只把它们的归档记录去掉。`,
-			);
-			if (!confirmed) return;
+			store.confirmation = {
+				kind: "prune", title: `清理${count}悬空归档条目？`,
+				description: "这些会话在磁盘上已不存在，只把它们的归档记录去掉。",
+			};
+			emit();
+		};
+		const pruneConfirmed = () => {
 			store.busy = true;
 			store.status = "正在清理悬空条目…";
 			emit();
@@ -222,6 +231,29 @@ window.__ModuleLoader__.load({
 					store.status = "清理失败（网络错误）";
 					emit();
 				});
+		};
+
+		// Electron's blocking window.confirm can leave the renderer unfocused.
+		// The host Modal owns its focus trap, Escape handling and focus restoration;
+		// no native window or global clipboard/focus hooks are needed here.
+		const ConfirmationDialog = () => {
+			const request = useShared().confirmation;
+			if (!request) return null;
+			const cancel = () => { store.confirmation = null; emit(); };
+			const confirm = () => {
+				if (store.confirmation !== request || store.busy) return;
+				store.confirmation = null;
+				if (request.kind === "delete") deleteConfirmed(request.ids);
+				else pruneConfirmed();
+			};
+			return h(Modal, {
+				open: true, title: request.title, description: request.description,
+				closeLabel: "取消", onClose: cancel,
+				footer: h(R.Fragment, null,
+					h(Button, { variant: "outline", "data-modal-autofocus": true, onClick: cancel }, "取消"),
+					h(Button, { variant: "outline", style: { color: "var(--dsw-alias-label-error,#c73f38)" }, onClick: confirm }, request.kind === "delete" ? "永久删除" : "清理"),
+				),
+			});
 		};
 
 		const flatButton = (secondary) => ({
@@ -451,6 +483,12 @@ window.__ModuleLoader__.load({
 						label: "删除已归档对话",
 					},
 					RowAction,
+				),
+			);
+			ctx.slots.inject("shell.overlay", () =>
+				ctx.slots.register(
+					{ name: "shell.overlay", id: "dsh-archive-delete-confirm", order: 901, label: "确认删除" },
+					ConfirmationDialog,
 				),
 			);
 			ctx.slots.inject("shell.overlay", () =>

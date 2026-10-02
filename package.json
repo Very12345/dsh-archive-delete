@@ -1,6 +1,6 @@
 {
   "name": "@very12345/dsh-archive-delete",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js && node selftest-entry.cjs"
@@ -41,7 +41,8 @@
     "selftest-entry.cjs",
     "README.md",
     "LICENSE",
-    "NOTICE"
+    "NOTICE",
+    "assets/settings-icon.svg"
   ],
   "dsh": {
     "bundle": {
